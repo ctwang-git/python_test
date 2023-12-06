@@ -75,20 +75,21 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         self.viewData.setMouseTracking(True)
         # self.viewData.mouseMoveEvent = self.mousemoveEvent
         # self.viewData.mousePressEvent = self.mousepressEvent
-        self.frame = QtWidgets.QGraphicsPixmapItem()
-        self.line = QtWidgets.QGraphicsLineItem()
-        self.line.setPen(QtCore.Qt.yellow)
+        self.frame = QtWidgets.QGraphicsPixmapItem()        
         self.scene = QtWidgets.QGraphicsScene()
         self.scene.addItem(self.frame)
-        self.scene.addItem(self.line)
+       
         self.scene.mouseMoveEvent = self.mousemoveEvent
         self.scene.mousePressEvent = self.mousepressEvent
-        self.lines = []
+        
         self.view_x = self.view.horizontalScrollBar()
         self.view_y = self.view.verticalScrollBar()
-        self.start_point = QtCore.QPointF()
-        self.end_point = QtCore.QPointF()
-        self.drawing_line = False
+        self.startPt = QtCore.QPointF()
+        self.endPt = QtCore.QPointF()
+        self.curline = None
+        self.scopline = None
+        self.drawStep = 0
+        self.vector = np.array([])
         
         self.view.installEventFilter(self)
         self.last_move_x = 0
@@ -138,27 +139,57 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
     def saveCam(self):
         self.useCam.saveImg(self.txtLot.text())
     def mousemoveEvent(self, event):
-        if self.drawing_line:
-            self.end_point = event.scenePos()
-            
-            
-            # self.scene.addItem(self.drawing_line)
-        # x = event.pos().x()
-        # y = event.pos().y() 
-        # self.debugBar('Pos: %, %d ' % x % y)
+        if self.scopline is not None:
+            if self.drawStep == 0:
+                self.endPt = event.scenePos()
+                X = self.startPt.x() * 2 - self.endPt.x()
+                Y = self.startPt.y() * 2 - self.endPt.y()
+                self.vector = np.array([self.endPt.y() - self.startPt.y(), -self.endPt.x() + self.startPt.x()])
+                self.curline.setLine(self.startPt.x(), self.startPt.y(), self.startPt.x() + self.vector[0], self.startPt.y() + self.vector[1])
+                self.scopline.setLine(X, Y, self.endPt.x(), self.endPt.y())
+            else:
+                self.endPt = event.scenePos()
+                w = np.array([self.endPt.x() - self.startPt.x(), self.endPt.y() - self.startPt.y()])
+                mu = np.dot(w, self.vector) / np.dot(self.vector, self.vector)
+                # mu = np.clip(mu, 0, 1)
+                dv = mu * self.vector 
+                self.curline.setLine(self.startPt.x(), self.startPt.y(), self.startPt.x() + dv[0], self.startPt.y() + dv[1])
     def mousepressEvent(self, event):
-        self.drawing_line = not self.drawing_line
-        if self.drawing_line:
-            self.start_point = event.scenePos()
-            print(self.start_point.x(), self.start_point.y())
-            self.end_point = self.start_point
-            
-            
-            # self.viewData.setScene(self.scene)
+        if self.scopline is None:
+            self.startPt = event.scenePos()
+            self.scopline = QtWidgets.QGraphicsLineItem(self.startPt.x(), self.startPt.y(), self.startPt.x(), self.startPt.y())
+            self.curline = QtWidgets.QGraphicsLineItem(self.startPt.x(), self.startPt.y(), self.startPt.x(), self.startPt.y())
+            self.scopline.setPen(QtCore.Qt.yellow)
+            pen = QtGui.QPen(QtCore.Qt.yellow, 1, QtCore.Qt.DotLine)
+            self.curline.setPen(pen)            
+            self.scene.addItem(self.scopline)
+            self.scene.addItem(self.curline)
         else:
-            self.end_point = event.scenePos()
-            print(self.end_point.x(), self.end_point.y())
-            self.lines.append(self.line)
+            self.endPt = event.scenePos()
+            if self.drawStep == 0:                
+                X = self.startPt.x() * 2 - self.endPt.x()
+                Y = self.startPt.y() * 2 - self.endPt.y()
+                self.scopline.setLine(X, Y, self.endPt.x(), self.endPt.y())
+                self.vector = np.array([self.endPt.y() - self.startPt.y(), -self.endPt.x() + self.startPt.x()])
+                self.curline.setLine(self.startPt.x(), self.startPt.y(), self.startPt.x() + self.vector[0], self.startPt.y() + self.vector[1])
+                # self.scopline = None
+                self.drawStep = 1
+            else:
+                w = np.array([self.endPt.x() - self.startPt.x(), self.endPt.y() - self.startPt.y()])
+                mu = np.dot(w, self.vector) / np.dot(self.vector, self.vector)
+                # mu = np.clip(mu, 0, 1)
+                dv = mu * self.vector 
+                self.curline.setLine(self.startPt.x(), self.startPt.y(), self.startPt.x() + dv[0], self.startPt.y() + dv[1])
+                self.curline.setPen(QtCore.Qt.yellow)
+                radius = (dv[0]**2 + dv[1] **2) ** 0.5
+                center_x, center_y = self.startPt.x() + dv[0], self.startPt.y() + dv[1]
+                circle = QtWidgets.QGraphicsEllipseItem(center_x - radius, center_y - radius, 2 * radius, 2 * radius)
+                pen = QtGui.QPen(QtCore.Qt.yellow, 1, QtCore.Qt.DotLine)
+                circle.setPen(pen)            
+                self.scene.addItem(circle)
+                self.curline = None
+                self.scopline = None
+                self.drawStep = 0
     def showData(self, img):
         self.Ny, self.Nx, _ = img.shape
         img_new = np.zeros_like(img)
@@ -170,7 +201,7 @@ class MainWindow(QtWidgets.QMainWindow, Ui_MainWindow):
         pix = QtGui.QPixmap.fromImage(qimg)
         # item = QtWidgets.QGraphicsPixmapItem(pix) 
         self.frame.setPixmap(pix)
-        self.line.setLine(self.start_point.x(), self.start_point.y(), self.end_point.x(), self.end_point.y())
+        
         # self.line = QtWidgets.QGraphicsLineItem(self.start_point.x(), self.start_point.y(), self.end_point.x(), self.end_point.y())
                
         # self.scene.addItem(item)
